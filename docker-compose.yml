@@ -1,0 +1,144 @@
+# DeerFlow deployment compose for Dokploy on mac-server.local
+# Wraps bytedance/deer-flow docker/docker-compose.yaml with mac-server specifics.
+# MAN-152: https://paperclip.ing/MAN/issues/MAN-152
+#
+# Setup steps (run on mac-server):
+#   1. Clone bytedance/deer-flow to $DEER_FLOW_REPO_ROOT
+#   2. Place config.yaml at $DEER_FLOW_CONFIG_PATH
+#   3. Place extensions_config.json at $DEER_FLOW_EXTENSIONS_CONFIG_PATH
+#   4. Create $DEER_FLOW_HOME directory
+#   5. Set all env vars in Dokploy (see .env.example)
+#   6. Deploy this compose in Dokploy under the agentopia project
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: deer-flow-nginx
+    # No host port binding — Caddy reverse-proxies by hostname
+    volumes:
+      - ${DEER_FLOW_REPO_ROOT}/docker/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+    environment:
+      - LANGGRAPH_UPSTREAM=${LANGGRAPH_UPSTREAM:-langgraph:2024}
+      - LANGGRAPH_REWRITE=${LANGGRAPH_REWRITE:-/}
+    command: >
+      sh -c "envsubst '$$LANGGRAPH_UPSTREAM $$LANGGRAPH_REWRITE'
+      < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+      && nginx -g 'daemon off;'"
+    depends_on:
+      - frontend
+      - gateway
+    networks:
+      - deer-flow
+      - agentopia_default
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ${DEER_FLOW_REPO_ROOT}
+      dockerfile: frontend/Dockerfile
+      target: prod
+    container_name: deer-flow-frontend
+    environment:
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://gateway:8001
+      - DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL=http://langgraph:2024
+    networks:
+      - deer-flow
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ${DEER_FLOW_REPO_ROOT}
+      dockerfile: backend/Dockerfile
+    container_name: deer-flow-gateway
+    command: sh -c "cd backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-4}"
+    volumes:
+      - ${DEER_FLOW_CONFIG_PATH}:/app/backend/config.yaml:ro
+      - ${DEER_FLOW_EXTENSIONS_CONFIG_PATH}:/app/backend/extensions_config.json:ro
+      - ${DEER_FLOW_REPO_ROOT}/skills:/app/skills:ro
+      - ${DEER_FLOW_HOME}:/app/backend/.deer-flow
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${HOME:-/root}/.claude
+        target: /root/.claude
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${HOME:-/root}/.codex
+        target: /root/.codex
+        read_only: true
+        bind:
+          create_host_path: true
+    environment:
+      - CI=true
+      - DEER_FLOW_HOME=/app/backend/.deer-flow
+      - DEER_FLOW_CONFIG_PATH=/app/backend/config.yaml
+      - DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
+      - DEER_FLOW_CHANNELS_LANGGRAPH_URL=http://langgraph:2024
+      - DEER_FLOW_CHANNELS_GATEWAY_URL=http://gateway:8001
+      - DEER_FLOW_HOST_BASE_DIR=${DEER_FLOW_HOME}
+      - DEER_FLOW_HOST_SKILLS_PATH=${DEER_FLOW_REPO_ROOT}/skills
+      - DEER_FLOW_SANDBOX_HOST=host.docker.internal
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+    env_file:
+      - ${DEER_FLOW_REPO_ROOT}/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - deer-flow
+    restart: unless-stopped
+
+  langgraph:
+    build:
+      context: ${DEER_FLOW_REPO_ROOT}
+      dockerfile: backend/Dockerfile
+    container_name: deer-flow-langgraph
+    command: sh -c 'cd /app/backend && uv run langgraph dev --no-browser --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10}'
+    volumes:
+      - ${DEER_FLOW_CONFIG_PATH}:/app/backend/config.yaml:ro
+      - ${DEER_FLOW_EXTENSIONS_CONFIG_PATH}:/app/backend/extensions_config.json:ro
+      - ${DEER_FLOW_HOME}:/app/backend/.deer-flow
+      - ${DEER_FLOW_REPO_ROOT}/skills:/app/skills:ro
+      - ${DEER_FLOW_REPO_ROOT}/backend/.langgraph_api:/app/backend/.langgraph_api
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${HOME:-/root}/.claude
+        target: /root/.claude
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${HOME:-/root}/.codex
+        target: /root/.codex
+        read_only: true
+        bind:
+          create_host_path: true
+    environment:
+      - CI=true
+      - DEER_FLOW_HOME=/app/backend/.deer-flow
+      - DEER_FLOW_CONFIG_PATH=/app/backend/config.yaml
+      - DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
+      - DEER_FLOW_HOST_BASE_DIR=${DEER_FLOW_HOME}
+      - DEER_FLOW_HOST_SKILLS_PATH=${DEER_FLOW_REPO_ROOT}/skills
+      - DEER_FLOW_SANDBOX_HOST=host.docker.internal
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+    env_file:
+      - ${DEER_FLOW_REPO_ROOT}/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - deer-flow
+    restart: unless-stopped
+
+networks:
+  deer-flow:
+    driver: bridge
+  agentopia_default:
+    external: true
