@@ -1,20 +1,27 @@
-# DeerFlow deployment compose for Dokploy on mac-server.local
-# Wraps bytedance/deer-flow docker/docker-compose.yaml with mac-server specifics.
-# MAN-152: https://paperclip.ing/MAN/issues/MAN-152
+# DeerFlow deployment for mac-server.local
+# MAN-152 | Routing: Traefik on dokploy-network (same as openclaw/paperclip)
 #
-# Setup steps (run on mac-server):
-#   1. Clone bytedance/deer-flow to $DEER_FLOW_REPO_ROOT
-#   2. Place config.yaml at $DEER_FLOW_CONFIG_PATH
-#   3. Place extensions_config.json at $DEER_FLOW_EXTENSIONS_CONFIG_PATH
-#   4. Create $DEER_FLOW_HOME directory
-#   5. Set all env vars in Dokploy (see .env.example)
-#   6. Deploy this compose in Dokploy under the agentopia project
+# One-time host setup (run on mac-server before first deploy):
+#   git clone https://github.com/bytedance/deer-flow /opt/deerflow/app
+#   mkdir -p /opt/deerflow/{config,data}
+#   # Copy config.yaml and extensions_config.json from this repo to /opt/deerflow/config/
+#
+# Required Dokploy env vars:
+#   DEER_FLOW_REPO_ROOT=/opt/deerflow/app
+#   DEER_FLOW_HOME=/opt/deerflow/data
+#   DEER_FLOW_CONFIG_PATH=/opt/deerflow/config/config.yaml
+#   DEER_FLOW_EXTENSIONS_CONFIG_PATH=/opt/deerflow/config/extensions_config.json
+#   ANTHROPIC_API_KEY=<Deer flow claude auth token from 1Password>
+#   CLAUDE_CODE_OAUTH_TOKEN=<same>
+#   GITHUB_TOKEN=<existing token>
+#   TELEGRAM_BOT_TOKEN=<from OpenClaw env>
+#   BETTER_AUTH_SECRET=<DeerFlow BETTER_AUTH_SECRET from 1Password>
+#   HOME=/root
 
 services:
   nginx:
     image: nginx:alpine
     container_name: deer-flow-nginx
-    # No host port binding — Caddy reverse-proxies by hostname
     volumes:
       - ${DEER_FLOW_REPO_ROOT}/docker/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
     environment:
@@ -27,9 +34,14 @@ services:
     depends_on:
       - frontend
       - gateway
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.deerflow.rule=Host(`deerflow.mac-server.local`)"
+      - "traefik.http.routers.deerflow.entrypoints=web"
+      - "traefik.http.services.deerflow.loadbalancer.server.port=2026"
     networks:
-      - deer-flow
-      - agentopia_default
+      - deerflow-internal
+      - dokploy-network
     restart: unless-stopped
 
   frontend:
@@ -43,7 +55,7 @@ services:
       - DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://gateway:8001
       - DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL=http://langgraph:2024
     networks:
-      - deer-flow
+      - deerflow-internal
     restart: unless-stopped
 
   gateway:
@@ -84,12 +96,10 @@ services:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-    env_file:
-      - ${DEER_FLOW_REPO_ROOT}/.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - deer-flow
+      - deerflow-internal
     restart: unless-stopped
 
   langgraph:
@@ -129,16 +139,14 @@ services:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-    env_file:
-      - ${DEER_FLOW_REPO_ROOT}/.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - deer-flow
+      - deerflow-internal
     restart: unless-stopped
 
 networks:
-  deer-flow:
+  deerflow-internal:
     driver: bridge
-  agentopia_default:
+  dokploy-network:
     external: true
