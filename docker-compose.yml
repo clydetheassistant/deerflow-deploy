@@ -1,29 +1,24 @@
 # DeerFlow deployment for mac-server.local
 # MAN-152 | Routing: Traefik on dokploy-network (same as openclaw/paperclip)
 #
-# One-time host setup (run on mac-server before first deploy):
-#   git clone https://github.com/bytedance/deer-flow /opt/deerflow/app
-#   mkdir -p /opt/deerflow/{config,data}
-#   # Copy config.yaml and extensions_config.json from this repo to /opt/deerflow/config/
+# Build source: bytedance/deer-flow via git submodule at ./deer-flow
+# Config: ./config/config.yaml and ./config/extensions_config.json (mounted read-only)
+# Secrets: set in Dokploy env vars
 #
 # Required Dokploy env vars:
-#   DEER_FLOW_REPO_ROOT=/opt/deerflow/app
-#   DEER_FLOW_HOME=/opt/deerflow/data
-#   DEER_FLOW_CONFIG_PATH=/opt/deerflow/config/config.yaml
-#   DEER_FLOW_EXTENSIONS_CONFIG_PATH=/opt/deerflow/config/extensions_config.json
 #   ANTHROPIC_API_KEY=<Deer flow claude auth token from 1Password>
 #   CLAUDE_CODE_OAUTH_TOKEN=<same>
 #   GITHUB_TOKEN=<existing token>
 #   TELEGRAM_BOT_TOKEN=<from OpenClaw env>
 #   BETTER_AUTH_SECRET=<DeerFlow BETTER_AUTH_SECRET from 1Password>
-#   HOME=/root
+#   HOME=/root  (for .claude / .codex bind mounts)
 
 services:
   nginx:
     image: nginx:alpine
     container_name: deer-flow-nginx
     volumes:
-      - ${DEER_FLOW_REPO_ROOT}/docker/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+      - ./deer-flow/docker/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
     environment:
       - LANGGRAPH_UPSTREAM=${LANGGRAPH_UPSTREAM:-langgraph:2024}
       - LANGGRAPH_REWRITE=${LANGGRAPH_REWRITE:-/}
@@ -46,7 +41,7 @@ services:
 
   frontend:
     build:
-      context: ${DEER_FLOW_REPO_ROOT}
+      context: ./deer-flow
       dockerfile: frontend/Dockerfile
       target: prod
     container_name: deer-flow-frontend
@@ -60,15 +55,15 @@ services:
 
   gateway:
     build:
-      context: ${DEER_FLOW_REPO_ROOT}
+      context: ./deer-flow
       dockerfile: backend/Dockerfile
     container_name: deer-flow-gateway
     command: sh -c "cd backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-4}"
     volumes:
-      - ${DEER_FLOW_CONFIG_PATH}:/app/backend/config.yaml:ro
-      - ${DEER_FLOW_EXTENSIONS_CONFIG_PATH}:/app/backend/extensions_config.json:ro
-      - ${DEER_FLOW_REPO_ROOT}/skills:/app/skills:ro
-      - ${DEER_FLOW_HOME}:/app/backend/.deer-flow
+      - ./config/config.yaml:/app/backend/config.yaml:ro
+      - ./config/extensions_config.json:/app/backend/extensions_config.json:ro
+      - ./deer-flow/skills:/app/skills:ro
+      - deerflow-data:/app/backend/.deer-flow
       - /var/run/docker.sock:/var/run/docker.sock
       - type: bind
         source: ${HOME:-/root}/.claude
@@ -89,9 +84,6 @@ services:
       - DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
       - DEER_FLOW_CHANNELS_LANGGRAPH_URL=http://langgraph:2024
       - DEER_FLOW_CHANNELS_GATEWAY_URL=http://gateway:8001
-      - DEER_FLOW_HOST_BASE_DIR=${DEER_FLOW_HOME}
-      - DEER_FLOW_HOST_SKILLS_PATH=${DEER_FLOW_REPO_ROOT}/skills
-      - DEER_FLOW_SANDBOX_HOST=host.docker.internal
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -104,16 +96,16 @@ services:
 
   langgraph:
     build:
-      context: ${DEER_FLOW_REPO_ROOT}
+      context: ./deer-flow
       dockerfile: backend/Dockerfile
     container_name: deer-flow-langgraph
     command: sh -c 'cd /app/backend && uv run langgraph dev --no-browser --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10}'
     volumes:
-      - ${DEER_FLOW_CONFIG_PATH}:/app/backend/config.yaml:ro
-      - ${DEER_FLOW_EXTENSIONS_CONFIG_PATH}:/app/backend/extensions_config.json:ro
-      - ${DEER_FLOW_HOME}:/app/backend/.deer-flow
-      - ${DEER_FLOW_REPO_ROOT}/skills:/app/skills:ro
-      - ${DEER_FLOW_REPO_ROOT}/backend/.langgraph_api:/app/backend/.langgraph_api
+      - ./config/config.yaml:/app/backend/config.yaml:ro
+      - ./config/extensions_config.json:/app/backend/extensions_config.json:ro
+      - deerflow-data:/app/backend/.deer-flow
+      - ./deer-flow/skills:/app/skills:ro
+      - ./deer-flow/backend/.langgraph_api:/app/backend/.langgraph_api
       - /var/run/docker.sock:/var/run/docker.sock
       - type: bind
         source: ${HOME:-/root}/.claude
@@ -132,9 +124,6 @@ services:
       - DEER_FLOW_HOME=/app/backend/.deer-flow
       - DEER_FLOW_CONFIG_PATH=/app/backend/config.yaml
       - DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
-      - DEER_FLOW_HOST_BASE_DIR=${DEER_FLOW_HOME}
-      - DEER_FLOW_HOST_SKILLS_PATH=${DEER_FLOW_REPO_ROOT}/skills
-      - DEER_FLOW_SANDBOX_HOST=host.docker.internal
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -144,6 +133,9 @@ services:
     networks:
       - deerflow-internal
     restart: unless-stopped
+
+volumes:
+  deerflow-data:
 
 networks:
   deerflow-internal:
