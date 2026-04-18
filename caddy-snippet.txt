@@ -1,7 +1,0 @@
-# Add to Caddyfile for deerflow.mac-server.local
-# This reverse-proxies to the DeerFlow nginx container on the agentopia_default network
-
-deerflow.mac-server.local {
-  tls internal
-  reverse_proxy deer-flow-nginx:2026
-}
