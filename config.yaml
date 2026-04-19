@@ -14,9 +14,8 @@ token_usage:
 models:
   - name: claude-sonnet
     display_name: Claude Sonnet 4.6
-    use: langchain_anthropic:ChatAnthropic
+    use: deerflow.models.claude_provider:ClaudeChatModel
     model: claude-sonnet-4-6
-    api_key: $ANTHROPIC_API_KEY
     default_request_timeout: 600.0
     max_retries: 2
     max_tokens: 16000
@@ -24,9 +23,8 @@ models:
 
   - name: claude-haiku
     display_name: Claude Haiku 4.5
-    use: langchain_anthropic:ChatAnthropic
+    use: deerflow.models.claude_provider:ClaudeChatModel
     model: claude-haiku-4-5-20251001
-    api_key: $ANTHROPIC_API_KEY
     default_request_timeout: 300.0
     max_retries: 2
     max_tokens: 8192
