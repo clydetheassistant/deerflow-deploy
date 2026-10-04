@@ -1,6 +1,6 @@
 # DeerFlow configuration for mac-server.local
 # Managed by: Paperclip IT Manager (MAN-152)
-config_version: 7
+config_version: 8
 
 log_level: info
 
@@ -12,10 +12,10 @@ token_usage:
 # Set ANTHROPIC_API_KEY env var to the Claude OAuth token value
 # ============================================================================
 models:
-  - name: claude-sonnet
-    display_name: Claude Sonnet 4.6
+  - name: claude-opus
+    display_name: Claude Opus 5.5
     use: deerflow.models.claude_provider:ClaudeChatModel
-    model: claude-sonnet-4-6
+    model: claude-opus-5-5
     default_request_timeout: 600.0
     max_retries: 2
     max_tokens: 16000
