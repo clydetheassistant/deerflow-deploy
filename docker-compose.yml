@@ -50,7 +50,7 @@ services:
       context: ./deer-flow
       dockerfile: backend/Dockerfile
     container_name: deer-flow-gateway
-    command: sh -c "cd backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-4}"
+    command: sh -c 'cd /app/backend && mkdir -p .deer-flow && { PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-4} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/gateway.log'
     volumes:
       - ./config.yaml:/app/backend/config.yaml:ro
       - ./extensions_config.json:/app/backend/extensions_config.json:ro
