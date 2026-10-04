@@ -71,17 +71,22 @@ async def authenticate(request):
 
     # Trusted internal caller path. The gateway's channel manager calls
     # langgraph with the shared internal token and (optionally) the real
-    # owner user id. Normalise the owner id with the same make_safe_user_id
-    # the Gateway uses so @auth.on's user_id filter matches threads that were
-    # created through the Gateway's own internal-auth path.
+    # owner user id. Return a dict identity that carries the owner id *and*
+    # an "internal" permission marker so @auth.on can recognise us and skip
+    # the user_id filter — important for pre-v2.1.0-rc0 threads that have
+    # no user_id in their stored metadata (filter would 404 them otherwise)
+    # and for any cross-user channel ops the trusted caller performs.
     internal_token = request.headers.get(INTERNAL_AUTH_HEADER_NAME)
     if internal_token and is_valid_internal_auth_token(internal_token):
         owner_user_id = request.headers.get(INTERNAL_OWNER_USER_ID_HEADER_NAME)
         if owner_user_id:
             owner_user_id = owner_user_id.strip()
-            if owner_user_id:
-                return make_safe_user_id(owner_user_id)
-        return AUTH_DISABLED_USER_ID
+        identity = make_safe_user_id(owner_user_id) if owner_user_id else AUTH_DISABLED_USER_ID
+        return {
+            "identity": identity,
+            "is_authenticated": True,
+            "permissions": ["internal"],
+        }
 
     if is_auth_disabled():
         return AUTH_DISABLED_USER_ID
@@ -117,6 +122,18 @@ async def authenticate(request):
 
 @auth.on
 async def add_owner_filter(ctx: Auth.types.AuthContext, value: dict):
+    # Trusted internal callers (gateway channel manager) have already proved
+    # identity via DEER_FLOW_INTERNAL_AUTH_TOKEN. Skip the user_id filter so
+    # they can access threads created in older DeerFlow versions that have no
+    # user_id in metadata, and so cross-user channel ops remain possible.
+    # Still stamp metadata.user_id on writes so new rows get the owner.
+    if "internal" in (getattr(ctx.user, "permissions", None) or []):
+        metadata = value.setdefault("metadata", {})
+        metadata["user_id"] = ctx.user.identity
+        if ctx.resource == "assistants" and ctx.action in {"create", "update"}:
+            metadata["created_by"] = "user"
+        return None
+
     if _STUDIO_USER_TYPE is not None and isinstance(ctx.user, _STUDIO_USER_TYPE) and ctx.resource == "assistants" and ctx.action in {"read", "search"}:
         return {
             "$or": [
