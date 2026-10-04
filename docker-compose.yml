@@ -50,7 +50,11 @@ services:
       context: ./deer-flow
       dockerfile: backend/Dockerfile
     container_name: deer-flow-gateway
-    command: sh -c 'cd /app/backend && mkdir -p .deer-flow && { PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-4} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/gateway.log'
+    # GATEWAY_WORKERS=1: Telegram's getUpdates allows only one consumer per bot token;
+    # multiple uvicorn workers each spawn a poller and race (409 Conflict + double-processing).
+    # DEER_FLOW_INTERNAL_AUTH_TOKEN: shared between gateway and langgraph via a token file on
+    # the deerflow-data volume so the gateway can authenticate to the langgraph API.
+    command: sh -c 'cd /app/backend && mkdir -p .deer-flow && [ -s .deer-flow/internal_auth.token ] || (umask 077 && head -c 48 /dev/urandom | base64 | tr -d "\n" > .deer-flow/internal_auth.token); export DEER_FLOW_INTERNAL_AUTH_TOKEN="$$(cat .deer-flow/internal_auth.token)"; { PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers ${GATEWAY_WORKERS:-1} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/gateway.log'
     volumes:
       - ./config.yaml:/app/backend/config.yaml:ro
       - ./extensions_config.json:/app/backend/extensions_config.json:ro
@@ -92,7 +96,9 @@ services:
       context: ./deer-flow
       dockerfile: backend/Dockerfile
     container_name: deer-flow-langgraph
-    command: sh -c 'cd /app/backend && touch .env && mkdir -p .deer-flow && { uv run langgraph dev --no-browser --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/langgraph.log'
+    # DEER_FLOW_INTERNAL_AUTH_TOKEN sourced from the shared .deer-flow/internal_auth.token
+    # file so gateway and langgraph agree on the token used by the auth middleware.
+    command: sh -c 'cd /app/backend && touch .env && mkdir -p .deer-flow && [ -s .deer-flow/internal_auth.token ] || (umask 077 && head -c 48 /dev/urandom | base64 | tr -d "\n" > .deer-flow/internal_auth.token); export DEER_FLOW_INTERNAL_AUTH_TOKEN="$$(cat .deer-flow/internal_auth.token)"; { uv run langgraph dev --no-browser --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/langgraph.log'
     volumes:
       - ./config.yaml:/app/backend/config.yaml:ro
       - ./extensions_config.json:/app/backend/extensions_config.json:ro
