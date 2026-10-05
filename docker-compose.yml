@@ -59,8 +59,9 @@ services:
       - ./config.yaml:/app/backend/config.yaml:ro
       - ./extensions_config.json:/app/backend/extensions_config.json:ro
       - ./deer-flow/skills:/app/skills:ro
-      # Local overlay: see patches/langgraph_auth.py for the one-line fix.
+      # Local overlays: see patches/*.py for the fixes layered over v2.1.0-rc0.
       - ./patches/langgraph_auth.py:/app/backend/app/gateway/langgraph_auth.py:ro
+      - ./patches/manager.py:/app/backend/app/channels/manager.py:ro
       - deerflow-data:/app/backend/.deer-flow
       - langgraph-api:/app/backend/.langgraph_api
       - /var/run/docker.sock:/var/run/docker.sock
