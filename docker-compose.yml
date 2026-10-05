@@ -101,7 +101,13 @@ services:
     container_name: deer-flow-langgraph
     # DEER_FLOW_INTERNAL_AUTH_TOKEN sourced from the shared .deer-flow/internal_auth.token
     # file so gateway and langgraph agree on the token used by the auth middleware.
-    command: sh -c 'cd /app/backend && touch .env && mkdir -p .deer-flow && [ -s .deer-flow/internal_auth.token ] || (umask 077 && head -c 48 /dev/urandom | base64 | tr -d "\n" > .deer-flow/internal_auth.token); export DEER_FLOW_INTERNAL_AUTH_TOKEN="$$(cat .deer-flow/internal_auth.token)"; { uv run langgraph dev --no-browser --no-reload --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/langgraph.log'
+    #
+    # --allow-blocking: v2.1.0-rc0's lead_agent + skill loader calls os.getcwd synchronously
+    # on run startup; langgraph dev's blockbuster safety guard kills the run before any
+    # message is emitted (channel reply falls back to "(No response from agent)"). Blocking
+    # I/O is a dev-mode nag, not a correctness issue -- our deployment runs the dev command
+    # because upstream DeerFlow doesn't ship a `langgraph serve` configuration yet.
+    command: sh -c 'cd /app/backend && touch .env && mkdir -p .deer-flow && [ -s .deer-flow/internal_auth.token ] || (umask 077 && head -c 48 /dev/urandom | base64 | tr -d "\n" > .deer-flow/internal_auth.token); export DEER_FLOW_INTERNAL_AUTH_TOKEN="$$(cat .deer-flow/internal_auth.token)"; { uv run langgraph dev --no-browser --no-reload --allow-blocking --host 0.0.0.0 --port 2024 --n-jobs-per-worker ${LANGGRAPH_JOBS_PER_WORKER:-10} 2>&1; echo "[exited with $$?]"; } | tee -a .deer-flow/langgraph.log'
     volumes:
       - ./config.yaml:/app/backend/config.yaml:ro
       - ./extensions_config.json:/app/backend/extensions_config.json:ro
